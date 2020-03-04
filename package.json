@@ -1,0 +1,16 @@
+{
+  "name": "aws-lambdas",
+  "version": "1.0.0",
+  "dependencies": {
+    "byline": "^5.0.0",
+    "elasticsearch": "15.1.1",
+    "http-aws-es": "6.0.0",
+    "js-yaml": "^3.13.1",
+    "moment": "^2.24.0",
+    "mssql": "4.1.0"
+  },
+  "devDependencies": {
+    "aws-sdk": "2.352.0",
+    "serverless-plugin-include-dependencies": "^3.1.1"
+  }
+}

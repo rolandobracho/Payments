@@ -1,0 +1,113 @@
+service: poc-process
+package:
+  individually: true
+  exclude:
+    - node_modules/**
+    - /aws-sdk/**
+    - .*/**
+
+frameworkVersion: "=1.37.1"
+
+custom:
+  currentStage: ${opt:stage}
+  parameters:
+    configAws: ${file(../env_${self:custom.currentStage}.yml):aws}
+    configPath: etc/ar
+    filenameInvoice: 'activator'
+    commonService: jat-common-functions-fac
+    commonEnvVar:
+      region: ${self:custom.parameters.configAws.region}
+      role: arn:aws:iam::${self:custom.parameters.configAws.accountId}:role/${self:custom.parameters.configAws.role}
+    ods:
+      user: ${file(../env_${self:custom.currentStage}.yml):ods.user}
+      password: ${file(../env_${self:custom.currentStage}.yml):ods.password}
+      server: ${file(../env_${self:custom.currentStage}.yml):ods.server}
+      port: ${file(../env_${self:custom.currentStage}.yml):ods.port}
+      stream: 'true'
+      database: ${file(../env_${self:custom.currentStage}.yml):ods.database}
+      requestTimeout: '180000'
+    tablesRegionFee:
+      database: ${file(../env_${self:custom.currentStage}.yml):tablesRegionFee.database}
+      tableName: RegionFee
+      select:
+        feeCode: feeCode
+        travelRegionCode: travelRegionCode
+        regionCode: regionCode
+        rateAmount: rateAmount
+        currencyCode: currencyCode
+        ratePercent: ratePercent
+provider:
+  name: aws
+  runtime: nodejs12.x
+  region: ${self:custom.parameters.configAws.region}
+  role: ${self:custom.parameters.commonEnvVar.role}
+  timeout: 300
+  memorySize: 1024
+
+resources:
+  Resources:
+    TemporaryPayments:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      Condition: excludeTables
+      Properties:
+        TableName: ${self:custom.parameters.tableNameTemporaryPayments}
+        AttributeDefinitions:
+          - AttributeName: organization_code
+            AttributeType: S
+          - AttributeName: payment_id
+            AttributeType: N
+        KeySchema:
+          - AttributeName: organization_code
+            KeyType: HASH
+          - AttributeName: payment_id
+            KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 100
+          WriteCapacityUnits: 50
+        SSESpecification:
+          SSEEnabled: true
+
+
+functions:
+  initProcess:
+    handler: init-process.handler
+    events:
+      - schedule:
+        rate: cron(0/5 * ? * * *)
+        enabled: false
+    environment:
+      doctypes: "110"
+      sqsMaxQueues: '110_10'
+      sqlConfigFilePre: etc/config1.json
+      sqlConfigFilePost: etc/config2.json
+      prefix: ${self:service}-${self:custom.currentStage}-request-payments
+      sqsPrefixToInvoice: ${self:service}-${self:custom.currentStage}-payments-to-invoice
+      lambdaToEnqueue: ${self:custom.parameters.commonService}-${self:custom.currentStage}-enQueue
+      lambdaToCreateQueues: ${self:custom.parameters.commonService}-${self:custom.currentStage}-creatorQueues
+      lambdaToDeleteQueues: ${self:custom.parameters.commonService}-${self:custom.currentStage}-deleteSQS    
+      folderNameInvoice: ${self:custom.parameters.configPath}/activate-invoicing
+      filenameInvoice: ${self:custom.parameters.filenameInvoice}
+      lambdaInitProcess: ${self:service}-${self:custom.currentStage}-initProcess
+      lambdaGetErrors: ${file(../../common/serverless.yml):service}-${self:custom.currentStage}-getErrors
+  initGetPayments:
+    handler: init-get-payments.handler
+    events:
+      - stream:
+          type: dynamodb
+          batchSize: 1
+          enabled: true
+          arn: ${file(../env_${self:custom.currentStage}.yml):tableNameProvisionalOperational}
+    environment:
+      tableNameOperational: ${file(../serverless.yml):custom.parameters.tableNameProvisionalOperational}
+      indexNameOperational: ${file(../serverless.yml):custom.parameters.indexNameProvisionalOperational}
+      noAcceptedStatus: 'ERROR,PENDING'
+      statusError: ERROR
+      statusOk: OK
+      lambdaInitGetPayments: ${self:service}-${self:custom.currentStage}-initGetPayments
+      lambdaGetErrors: ${file(../../common/serverless.yml):service}-${self:custom.currentStage}-getErrors
+      lambdaToCall: ${file(../../common/serverless.yml):service}-${self:custom.currentStage}-getOdsPayments
+  insertTemporaryPayments:
+    handler: insert-temporary-payments.handler
+    environment:
+      tableNameTemporaryPayments: ${self:custom.parameters.tableNameTemporaryPayments}
